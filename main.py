@@ -2,43 +2,82 @@ import os
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 import pandas as pd
-import requests # <--- Nouvelle librairie pour parler à Telegram
+import requests
 import time
+from datetime import datetime # <--- Nouvel import pour gérer l'heure
 
 load_dotenv()
 EMAIL = os.getenv("ALIN_EMAIL")
 PASSWORD = os.getenv("ALIN_PASSWORD")
-# On charge les clés Telegram
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 FICHIER_HISTORIQUE = "historique.csv"
 
-# --- FONCTION D'ENVOI TELEGRAM ---
+# --- FONCTIONS UTILES ---
+
 def envoyer_notif(message):
     try:
-        # L'URL magique de Telegram
         url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-        # Les données à envoyer
-        params = {
-            "chat_id": TG_CHAT_ID,
-            "text": message
-        }
-        # On envoie la requête
+        params = {"chat_id": TG_CHAT_ID, "text": message}
         requests.get(url, params=params)
     except Exception as e:
-        print(f"Erreur envoi Telegram : {e}")
+        print(f"Erreur Telegram : {e}")
+
+# Modifié : on ajoute l'argument 'nom_onglet' pour savoir d'où vient l'offre
+def analyser_la_page(page, deja_vus_signatures, nom_onglet):
+    offres_structurees = []
+    
+    try:
+        page.wait_for_timeout(3000) 
+    except:
+        pass
+
+    elements_prix = page.locator("text=Hors charge").all()
+    
+    for element in elements_prix:
+        try:
+            carte_complete = element.locator("xpath=../../..")
+            texte_brut = carte_complete.inner_text()
+            signature = texte_brut.replace("\n", " | ").strip()
+            
+            # Si c'est nouveau, on crée un "pack" complet d'infos
+            if signature not in deja_vus_signatures:
+                # On capture la date et l'heure actuelles
+                date_actuelle = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                info_offre = {
+                    "signature": signature,
+                    "date_detection": date_actuelle,
+                    "onglet_source": nom_onglet
+                }
+                offres_structurees.append(info_offre)
+        except:
+            pass
+            
+    return offres_structurees
+
+# --- PROGRAMME PRINCIPAL ---
 
 def run():
     print("🧠 Chargement de la mémoire...")
-    deja_vus = []
+    
+    # On prépare deux variables : 
+    # 1. Le DataFrame complet (pour tout sauvegarder à la fin)
+    # 2. La liste simple des signatures (pour vérifier rapidement si on connait déjà)
+    
+    df_historique = pd.DataFrame(columns=["signature", "date_detection", "onglet_source"])
+    deja_vus_signatures = []
+
     if os.path.exists(FICHIER_HISTORIQUE):
         try:
-            df = pd.read_csv(FICHIER_HISTORIQUE)
-            deja_vus = df["signature"].tolist()
+            df_historique = pd.read_csv(FICHIER_HISTORIQUE)
+            deja_vus_signatures = df_historique["signature"].tolist()
+            print(f"   -> {len(deja_vus_signatures)} offres déjà en mémoire.")
         except:
-            pass
+            print("   -> Fichier historique illisible ou vide.")
 
     with sync_playwright() as p:
+        # Pense à mettre headless=True pour GitHub Actions
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
         page = context.new_page()
@@ -57,46 +96,74 @@ def run():
         page.fill('[formcontrolname="password"]', PASSWORD)
         page.get_by_role("button", name="JE ME CONNECTE").click()
         
-        print("⏳ Analyse des offres...")
-        try:
-            page.wait_for_selector("text=Hors charge", timeout=15000)
-        except:
-            print("⚠️ Pas d'offres visibles.")
+        print("⏳ Attente du tableau de bord...")
+        page.wait_for_timeout(5000)
 
-        elements_prix = page.locator("text=Hors charge").all()
-        offres_du_jour = []
-        nouvelles_offres_detectees = 0
+        # --- ANALYSE DES ONGLETS ---
+        
+        mots_cles_onglets = [
+            "limitrophes", 
+            "Autres communes"
+        ]
+        
+        # Liste pour stocker les dictionnaires des nouvelles offres
+        toutes_les_nouvelles_offres = [] 
 
-        for element in elements_prix:
+        # 1. Onglet par défaut
+        print("\n👉 Onglet par défaut...")
+        nouveautes = analyser_la_page(page, deja_vus_signatures, "Communes demandées (Défaut)")
+        toutes_les_nouvelles_offres.extend(nouveautes)
+
+        # 2. Autres onglets
+        for mot_cle in mots_cles_onglets:
+            print(f"\n👉 Recherche onglet : '{mot_cle}'")
             try:
-                carte_complete = element.locator("xpath=../../..")
-                texte_brut = carte_complete.inner_text()
-                signature = texte_brut.replace("\n", " | ").strip()
-                offres_du_jour.append(signature)
-
-                if signature in deja_vus:
-                    print(".", end="", flush=True)
-                else:
-                    nouvelles_offres_detectees += 1
-                    print(f"\n🚨 NOUVELLE OFFRE !")
-                    
-                    # --- ENVOI TELEGRAM ---
-                    # On prépare un joli message
-                    msg = f"🏠 NOUVELLE OFFRE AL-IN !\n\n{signature}\n\n👉 https://al-in.fr"
-                    envoyer_notif(msg)
-                    print("✅ Notification envoyée.")
-                    # ----------------------
-                    
+                onglet = page.locator("div").filter(has_text=mot_cle).last
+                onglet.highlight()
+                onglet.click()
+                print("   ✅ Clic effectué.")
+                
+                print("   ⏳ Chargement (5s)...")
+                time.sleep(5)
+                
+                # On passe le nom du mot clé comme "Source"
+                nouveautes = analyser_la_page(page, deja_vus_signatures, mot_cle)
+                print(f"   -> {len(nouveautes)} nouvelles offres ici.")
+                
+                toutes_les_nouvelles_offres.extend(nouveautes)
+                
             except Exception as e:
-                pass
+                print(f"   ⚠️ Onglet '{mot_cle}' non trouvé ou vide.")
 
-        print(f"\n📊 Fin. {nouvelles_offres_detectees} notifs envoyées.")
+        # --- FIN ET SAUVEGARDE ---
+
+        if len(toutes_les_nouvelles_offres) > 0:
+            print(f"\n🚨 {len(toutes_les_nouvelles_offres)} NOUVEAUTÉS AU TOTAL !")
+            
+            # Envoi des notifs Telegram
+            for offre in toutes_les_nouvelles_offres:
+                # Attention : offre est maintenant un dictionnaire, il faut accéder au champ 'signature'
+                signature_txt = offre['signature']
+                onglet_txt = offre['onglet_source']
+                
+                message = f"🏠 ALERTE AL-IN ({onglet_txt}) !\n\n{signature_txt}\n\n👉 https://al-in.fr"
+                envoyer_notif(message)
+            
+            # --- SAUVEGARDE INTELLIGENTE ---
+            # 1. On transforme les nouvelles offres en DataFrame
+            df_nouveautes = pd.DataFrame(toutes_les_nouvelles_offres)
+            
+            # 2. On colle les nouveautés à la suite de l'historique existant
+            df_final = pd.concat([df_historique, df_nouveautes], ignore_index=True)
+            
+            # 3. On sauvegarde le tout
+            df_final.to_csv(FICHIER_HISTORIQUE, index=False)
+            print("💾 Historique étendu mis à jour (avec dates et onglets).")
+            
+        else:
+            print("\n✅ Rien de nouveau.")
+
         browser.close()
 
-    if len(offres_du_jour) > 0:
-        df_save = pd.DataFrame(offres_du_jour, columns=["signature"])
-        df_save.to_csv(FICHIER_HISTORIQUE, index=False)
-
 if __name__ == "__main__":
-
     run()
