@@ -1,0 +1,43 @@
+name: Bot Al-in Logement
+
+on:
+  schedule:
+    # Lance le bot à 8h00, 12h00, 16h00 et 20h00 (Heure UTC, donc -1h ou -2h par rapport à France)
+    - cron: '0 8,12,16,20 * * *'
+  # Permet de lancer le bot manuellement pour tester
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v3
+
+      - name: Installation de Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Installation des outils
+        run: |
+          pip install playwright pandas requests python-dotenv
+          playwright install chromium
+
+      - name: Lancement du Bot
+        env:
+          # On connecte le coffre-fort au script
+          ALIN_EMAIL: ${{ secrets.ALIN_EMAIL }}
+          ALIN_PASSWORD: ${{ secrets.ALIN_PASSWORD }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Sauvegarde de la mémoire (Commit)
+        run: |
+          git config --global user.name 'Bot Alin'
+          git config --global user.email 'bot@noreply.github.com'
+          git add historique.csv
+          # On ne fait le commit que s'il y a du changement
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Mise à jour des offres vues" && git push)
