@@ -3,7 +3,7 @@ name: Bot Al-in Logement
 on:
   schedule:
     # Lance le bot à 8h00, 12h00, 16h00 et 20h00 (Heure UTC, donc -1h ou -2h par rapport à France)
-    - cron: '0 8,12,16,20 * * *'
+    - cron: '0 8,11,16,18,20,22 * * *'
   # Permet de lancer le bot manuellement pour tester
   workflow_dispatch:
 
