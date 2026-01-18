@@ -14,7 +14,7 @@ TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 FICHIER_HISTORIQUE = "historique.csv"
 
-URL_INLI = "https://www.inli.fr/locations/offres/ile-de-france-region_r:11?price_min=0&price_max=1000&area_min=0&area_max=250&room_min=0&room_max=5&bedroom_min=1&bedroom_max=5" 
+URL_INLI = "https://www.inli.fr/locations/offres/ile-de-france-region_r:11?price_min=0&price_max=1000&area_min=0&area_max=250&room_min=0&room_max=5&bedroom_min=1&bedroom_max=5&order%5BpriceWithCharges%5D=asc" 
 
 # --- FONCTIONS UTILES ---
 
@@ -194,3 +194,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
